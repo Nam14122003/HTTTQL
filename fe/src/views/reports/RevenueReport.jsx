@@ -101,17 +101,17 @@ const RevenueReport = () => {
 
   // Tính tổng doanh thu
   const calculateTotalRevenue = () => {
-    return reportData.reduce((total, item) => total + (item.revenue || 0), 0);
+    return reportData.reduce((total, item) => total + Number(item.revenue || 0), 0);
   };
 
   // Tính tổng chi phí
   const calculateTotalCost = () => {
-    return reportData.reduce((total, item) => total + (item.cost || 0), 0);
+    return reportData.reduce((total, item) => total + Number(item.cost || 0), 0);
   };
 
   // Tính tổng lợi nhuận
   const calculateTotalProfit = () => {
-    return reportData.reduce((total, item) => total + (item.profit || 0), 0);
+    return reportData.reduce((total, item) => total + Number(item.profit || 0), 0);
   };
 
   // Chuẩn bị dữ liệu cho biểu đồ
