@@ -211,6 +211,26 @@ const RevenueReport = () => {
     };
   };
 
+  // Hàm kiểm tra thay đổi đột ngột và trả về danh sách các giai đoạn bị thay đổi (chỉ trả về nếu tăng/giảm mạnh trên 20 triệu)
+  const getSuddenChanges = (data, key = 'revenue', thresholdAmount = 20000000) => {
+    if (!data || data.length < 2) return [];
+    const result = [];
+    for (let i = 1; i < data.length; i++) {
+      const prev = Number(data[i - 1][key] || 0);
+      const curr = Number(data[i][key] || 0);
+      const diff = curr - prev;
+      if (Math.abs(diff) >= thresholdAmount) {
+        result.push({
+          from: data[i - 1].time_period,
+          to: data[i].time_period,
+          type: diff > 0 ? 'tăng mạnh' : 'giảm mạnh',
+          value: diff
+        });
+      }
+    }
+    return result;
+  };
+
   return (
     <div className="flex flex-col min-h-screen">
       <Header />
@@ -333,7 +353,42 @@ const RevenueReport = () => {
         <div className="grid grid-cols-1 gap-6 mb-6">
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold text-gray-700 mb-4">Biểu đồ doanh thu, chi phí và lợi nhuận</h2>
-            
+            {/* Cảnh báo nếu có thay đổi đột ngột */}
+            {!isLoading && reportData.length > 1 && (() => {
+              const suddenRevenue = getSuddenChanges(reportData, 'revenue');
+              const suddenCost = getSuddenChanges(reportData, 'cost');
+              const suddenProfit = getSuddenChanges(reportData, 'profit');
+              if (suddenRevenue.length || suddenCost.length || suddenProfit.length) {
+                return (
+                  <div className="mb-4 flex items-start p-4 bg-yellow-200 border-l-8 border-yellow-600 text-yellow-900 font-bold rounded shadow animate-pulse">
+                    <svg className="w-7 h-7 mr-3 text-yellow-600 flex-shrink-0 mt-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                      <span className="underline">Cảnh báo:</span> Có sự thay đổi đột ngột giữa các giai đoạn:
+                      <ul className="list-disc pl-6 font-normal mt-1">
+                        {suddenRevenue.map((chg, idx) => (
+                          <li key={'rev'+idx}>
+                            Doanh thu {chg.type}: {chg.from} → {chg.to}
+                          </li>
+                        ))}
+                        {suddenCost.map((chg, idx) => (
+                          <li key={'cost'+idx}>
+                            Chi phí {chg.type}: {chg.from} → {chg.to}
+                          </li>
+                        ))}
+                        {suddenProfit.map((chg, idx) => (
+                          <li key={'profit'+idx}>
+                            Lợi nhuận {chg.type}: {chg.from} → {chg.to}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             <div className="h-96">
               {isLoading ? (
                 <Loading />
@@ -379,7 +434,30 @@ const RevenueReport = () => {
           
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold text-gray-700 mb-4">Biểu đồ xu hướng doanh thu</h2>
-            
+            {/* Cảnh báo nếu có thay đổi đột ngột doanh thu */}
+            {!isLoading && reportData.length > 1 && (() => {
+              const suddenRevenue = getSuddenChanges(reportData, 'revenue');
+              if (suddenRevenue.length) {
+                return (
+                  <div className="mb-4 flex items-start p-4 bg-yellow-200 border-l-8 border-yellow-600 text-yellow-900 font-bold rounded shadow animate-pulse">
+                    <svg className="w-7 h-7 mr-3 text-yellow-600 flex-shrink-0 mt-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                      <span className="underline">Cảnh báo:</span> Doanh thu có sự thay đổi đột ngột giữa các giai đoạn:
+                      <ul className="list-disc pl-6 font-normal mt-1">
+                        {suddenRevenue.map((chg, idx) => (
+                          <li key={'trend-rev'+idx}>
+                            Doanh thu {chg.type}: {chg.from} → {chg.to}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
             <div className="h-80">
               {isLoading ? (
                 <Loading />
