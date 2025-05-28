@@ -15,4 +15,7 @@ router.get('/inventory', authenticate, isManager, reportController.getInventoryR
 // Lấy lịch sử giao dịch (chỉ manager hoặc admin)
 router.get('/transactions', authenticate, isManager, reportController.getTransactionHistory);
 
+// Thêm route cho API export Excel báo cáo doanh thu chi tiết
+router.get('/revenue/export-excel', authenticate, isManager, reportController.exportRevenueReportToExcel);
+
 module.exports = router;

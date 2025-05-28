@@ -1,4 +1,4 @@
-  import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
   import { Link } from 'react-router-dom';
   import Header from '../../components/common/Header';
   import Footer from '../../components/common/Footer';
@@ -17,6 +17,7 @@
     ArcElement,
   } from 'chart.js';
   import { Bar, Line } from 'react-chartjs-2';
+  import axios from 'axios';
 
   // Register ChartJS components
   ChartJS.register(
@@ -49,6 +50,10 @@
       { from: 'bot', text: 'Xin chào! Bạn muốn tư vấn gì về số liệu doanh thu, chi phí, lợi nhuận?' },
     ]);
     const chatEndRef = useRef(null);
+
+    // Export state
+    const [exporting, setExporting] = useState(false);
+    const [exportMessage, setExportMessage] = useState('');
 
     // Date helpers
     function getCurrentDate() {
@@ -516,6 +521,59 @@
 
     const filteredReportData = reportData.filter(item => !isAllZero(item));
 
+    // Hàm lưu file dùng File System Access API nếu có, fallback dùng tạo link download
+    const saveFile = async (blob, filename) => {
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: filename,
+            types: [{
+              description: 'Excel file',
+              accept: {'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']}
+            }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        } catch (error) {
+          // Người dùng hủy chọn, không làm gì
+        }
+      } else {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    const handleExportDetailExcel = async () => {
+      setExporting(true);
+      setExportMessage('');
+      try {
+        const params = {
+          startDate: filters.startDate,
+          endDate: filters.endDate,
+          groupBy: filters.groupBy
+        };
+        const response = await axios.get('http://localhost:5000/api/reports/revenue/export-excel', {
+          params,
+          responseType: 'blob',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        await saveFile(blob, 'revenue_report_detail.xlsx');
+      } catch (err) {
+        setExportMessage('Không thể xuất file Excel');
+      }
+      setExporting(false);
+    };
+
     return (
       <div className="flex flex-col min-h-screen">
         <Header />
@@ -777,9 +835,20 @@
 
           {/* Detail table */}
           <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="px-6 py-4 border-b">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
               <h2 className="text-lg font-semibold text-gray-700">Dữ liệu chi tiết</h2>
+              <button
+                onClick={handleExportDetailExcel}
+                disabled={exporting}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              >
+                {exporting ? 'Đang xuất...' : 'Xuất Excel'}
+              </button>
             </div>
+
+            {exportMessage && (
+              <div className="px-6 py-2 text-red-600">{exportMessage}</div>
+            )}
 
             {isLoading ? (
               <Loading />

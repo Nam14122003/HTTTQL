@@ -106,41 +106,32 @@ class Product {
   static async getAll(filters = {}) {
     try {
       let query = `
-        SELECT p.*, s.name as supplier_name 
+        SELECT p.id, p.name, p.sku, p.category, p.size, p.color, p.quantity, p.selling_price, p.status
         FROM products p
-        LEFT JOIN suppliers s ON p.supplier_id = s.id
       `;
-      
       const conditions = [];
       const values = [];
-      
       // Thêm các điều kiện lọc nếu có
       if (filters.category) {
         conditions.push('p.category = ?');
         values.push(filters.category);
       }
-      
       if (filters.status) {
         conditions.push('p.status = ?');
         values.push(filters.status);
       }
-      
       if (filters.supplier_id) {
         conditions.push('p.supplier_id = ?');
         values.push(filters.supplier_id);
       }
-      
       if (conditions.length) {
         query += ' WHERE ' + conditions.join(' AND ');
       }
-      
-      // Thêm sắp xếp nếu có
       if (filters.sort) {
         query += ` ORDER BY ${filters.sort} ${filters.order || 'ASC'}`;
       } else {
         query += ' ORDER BY p.name ASC';
       }
-      
       const [rows] = await pool.query(query, values);
       return rows;
     } catch (error) {
