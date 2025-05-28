@@ -308,3 +308,104 @@ exports.exportRevenueReportToExcel = async (req, res, next) => {
     next(error);
   }
 };
+
+// Export báo cáo tồn kho ra Excel
+exports.exportInventoryReportToExcel = async (req, res, next) => {
+  try {
+    // Lấy danh sách sản phẩm và thông tin tồn kho
+    const [inventoryData] = await pool.query(
+      `SELECT 
+        p.id, p.name, p.sku, p.category, p.size, p.color,
+        p.quantity, p.cost_price, p.selling_price,
+        (p.quantity * p.cost_price) as inventory_value,
+        s.name as supplier_name
+       FROM products p
+       LEFT JOIN suppliers s ON p.supplier_id = s.id
+       ORDER BY inventory_value DESC`
+    );
+
+    // Chuẩn bị dữ liệu xuất Excel
+    const exportData = inventoryData.map(item => ({
+      'ID': item.id,
+      'Tên sản phẩm': item.name,
+      'SKU': item.sku,
+      'Danh mục': item.category,
+      'Kích cỡ': item.size,
+      'Màu sắc': item.color,
+      'Số lượng': item.quantity,
+      'Giá nhập': item.cost_price,
+      'Giá bán': item.selling_price,
+      'Giá trị tồn': item.inventory_value,
+      'Nhà cung cấp': item.supplier_name
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'InventoryReport');
+
+    const exportDir = path.join(__dirname, '../exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir);
+    }
+    const exportFile = path.join(exportDir, 'inventory_report.xlsx');
+    XLSX.writeFile(workbook, exportFile);
+
+    res.download(exportFile, 'inventory_report.xlsx', err => {
+      fs.unlink(exportFile, () => {});
+      if (err) next(err);
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Export chi tiết giao dịch ra Excel
+exports.exportTransactionHistoryToExcel = async (req, res, next) => {
+  try {
+    // Lấy khoảng thời gian và các bộ lọc từ query params
+    const { startDate, endDate, type, productId } = req.query;
+
+    const filters = {
+      start_date: startDate,
+      end_date: endDate,
+      type,
+      product_id: productId,
+      limit: 10000, // xuất tối đa 10k dòng
+      offset: 0
+    };
+
+    // Lấy danh sách giao dịch
+    const transactions = await Transaction.getAll(filters);
+
+    // Chuẩn bị dữ liệu xuất Excel
+    const exportData = transactions.map(item => ({
+      'ID': item.id,
+      'Ngày giao dịch': item.transaction_date,
+      'Loại': item.type,
+      'Sản phẩm': item.product_name || item.product_id,
+      'SKU': item.sku,
+      'Số lượng': item.quantity,
+      'Đơn giá': item.unit_price,
+      'Tổng tiền': item.total_amount,
+      'Ghi chú': item.note
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'TransactionHistory');
+
+    const exportDir = path.join(__dirname, '../exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir);
+    }
+    const exportFile = path.join(exportDir, 'transaction_history.xlsx');
+    XLSX.writeFile(workbook, exportFile);
+
+    res.download(exportFile, 'transaction_history.xlsx', err => {
+      fs.unlink(exportFile, () => {});
+      if (err) next(err);
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -18,4 +18,10 @@ router.get('/transactions', authenticate, isManager, reportController.getTransac
 // Thêm route cho API export Excel báo cáo doanh thu chi tiết
 router.get('/revenue/export-excel', authenticate, isManager, reportController.exportRevenueReportToExcel);
 
+// Thêm route cho API export Excel báo cáo tồn kho
+router.get('/inventory/export-excel', authenticate, isManager, reportController.exportInventoryReportToExcel);
+
+// Thêm route cho API export Excel chi tiết giao dịch
+router.get('/transactions/export-excel', authenticate, isManager, reportController.exportTransactionHistoryToExcel);
+
 module.exports = router;
