@@ -1,5 +1,8 @@
 const { Transaction, Product } = require('../models/Index');
 const { pool } = require('../config/database');
+const XLSX = require('xlsx');
+const fs = require('fs');
+const path = require('path');
 
 // Lấy danh sách giao dịch
 exports.getAllTransactions = async (req, res, next) => {
@@ -194,6 +197,119 @@ exports.getProductMovement = async (req, res, next) => {
         current_quantity: product.quantity
       },
       data: movementData
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Xuất giao dịch ra file Excel
+exports.exportTransactionsToExcel = async (req, res, next) => {
+  try {
+    const filters = {
+      start_date: req.query.startDate,
+      end_date: req.query.endDate,
+      type: req.query.type,
+      product_id: req.query.productId,
+      performed_by: req.query.userId
+    };
+    const transactions = await Transaction.getAll(filters);
+
+    // Map dữ liệu cho Excel
+    const exportData = transactions.map((t, idx) => ({
+      'STT': idx + 1,
+      'Loại': t.type === 'import' ? 'Nhập kho' : t.type === 'export' ? 'Xuất kho' : 'Điều chỉnh',
+      'Sản phẩm': t.product_name || t.product || '',
+      'Mã SKU': t.sku || '',
+      'Số lượng': t.quantity,
+      'Đơn giá': t.price_per_unit,
+      'Thành tiền': t.total_amount,
+      'Ngày': t.transaction_date ? new Date(t.transaction_date).toLocaleString('vi-VN') : '',
+      'Người thực hiện': t.performed_by_name || t.performed_by || '',
+      'Số tham chiếu': t.reference_number || '',
+      'Ghi chú': t.notes || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions');
+
+    const exportDir = path.join(__dirname, '../exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir);
+    }
+    const exportFile = path.join(exportDir, 'transactions_export.xlsx');
+    XLSX.writeFile(workbook, exportFile);
+
+    res.download(exportFile, 'transactions_export.xlsx', err => {
+      fs.unlink(exportFile, () => {});
+      if (err) next(err);
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Nhập giao dịch từ file Excel
+exports.importTransactionsFromExcel = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Vui lòng tải lên file Excel' });
+    }
+    const filePath = req.file.path;
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+
+    let imported = 0;
+    for (const row of rows) {
+      // Map trường từ Excel sang DB
+      const typeMap = { 'Nhập kho': 'import', 'Xuất kho': 'export', 'Điều chỉnh': 'adjustment' };
+      const type = typeMap[row['Loại']] || row['type'];
+      const productName = row['Sản phẩm'] || row['product_name'] || row['product'];
+      const sku = row['Mã SKU'] || row['sku'];
+      const quantity = row['Số lượng'] || row['quantity'];
+      const price_per_unit = row['Đơn giá'] || row['price_per_unit'];
+      const total_amount = row['Thành tiền'] || row['total_amount'];
+      const transaction_date = row['Ngày'] || row['transaction_date'];
+      const reference_number = row['Số tham chiếu'] || row['reference_number'] || '';
+      const notes = row['Ghi chú'] || row['notes'] || '';
+
+      // Tìm product_id theo SKU hoặc tên sản phẩm
+      let product_id = null;
+      if (sku) {
+        const product = await Product.search(sku);
+        if (product && product.length > 0) product_id = product[0].id;
+      }
+      if (!product_id && productName) {
+        const product = await Product.search(productName);
+        if (product && product.length > 0) product_id = product[0].id;
+      }
+      if (!type || !product_id || !quantity || !price_per_unit) continue;
+
+      try {
+        await Transaction.create({
+          type,
+          product_id,
+          quantity,
+          price_per_unit,
+          total_amount: total_amount || (quantity * price_per_unit),
+          reference_number,
+          notes,
+          performed_by: req.user.id,
+          transaction_date // Nếu muốn set ngày theo file, cần sửa Transaction.create cho phép truyền transaction_date
+        });
+        imported++;
+      } catch (err) {
+        // Có thể log lỗi từng dòng nếu muốn
+      }
+    }
+
+    fs.unlink(filePath, () => {});
+    res.status(200).json({
+      success: true,
+      message: `Đã import ${imported} giao dịch thành công`
     });
   } catch (error) {
     next(error);

@@ -1,5 +1,8 @@
 const { Transaction, Product } = require('../models/Index');
 const { pool } = require('../config/database');
+const XLSX = require('xlsx');
+const fs = require('fs');
+const path = require('path');
 
 // Báo cáo tổng quan
 exports.getDashboardStats = async (req, res, next) => {
@@ -221,6 +224,186 @@ exports.getTransactionHistory = async (req, res, next) => {
       total: totalCount,
       count: transactions.length,
       data: transactions
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Export báo cáo doanh thu chi tiết ra Excel
+exports.exportRevenueReportToExcel = async (req, res, next) => {
+  try {
+    const { startDate, endDate, groupBy } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng cung cấp ngày bắt đầu và ngày kết thúc'
+      });
+    }
+
+    let timeFormat;
+    switch (groupBy) {
+      case 'month':
+        timeFormat = '%Y-%m';
+        break;
+      case 'year':
+        timeFormat = '%Y';
+        break;
+      default:
+        timeFormat = '%Y-%m-%d';
+    }
+
+    // Lấy dữ liệu báo cáo
+    const [revenueData] = await pool.query(
+      `SELECT 
+        DATE_FORMAT(transaction_date, ?) as time_period,
+        SUM(CASE WHEN type = 'export' THEN total_amount ELSE 0 END) as revenue,
+        SUM(CASE WHEN type = 'import' THEN total_amount ELSE 0 END) as cost,
+        SUM(CASE WHEN type = 'export' THEN total_amount ELSE 0 END) - 
+        SUM(CASE WHEN type = 'import' THEN total_amount ELSE 0 END) as profit
+       FROM transactions
+       WHERE transaction_date BETWEEN ? AND ?
+       GROUP BY time_period
+       ORDER BY time_period ASC`,
+      [timeFormat, startDate, endDate]
+    );
+
+    // Chuẩn bị dữ liệu xuất Excel
+    const exportData = revenueData.map(row => ({
+      'Thời gian': row.time_period,
+      'Doanh thu': row.revenue || 0,
+      'Chi phí': row.cost || 0,
+      'Lợi nhuận': row.profit || 0
+    }));
+
+    // Thêm dòng tổng cộng
+    if (exportData.length > 0) {
+      const totalRevenue = exportData.reduce((sum, r) => sum + Number(r['Doanh thu'] || 0), 0);
+      const totalCost = exportData.reduce((sum, r) => sum + Number(r['Chi phí'] || 0), 0);
+      const totalProfit = exportData.reduce((sum, r) => sum + Number(r['Lợi nhuận'] || 0), 0);
+      exportData.push({
+        'Thời gian': 'TỔNG CỘNG',
+        'Doanh thu': totalRevenue,
+        'Chi phí': totalCost,
+        'Lợi nhuận': totalProfit
+      });
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'RevenueReport');
+
+    const exportDir = path.join(__dirname, '../exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir);
+    }
+    const exportFile = path.join(exportDir, 'revenue_report_detail.xlsx');
+    XLSX.writeFile(workbook, exportFile);
+
+    res.download(exportFile, 'revenue_report_detail.xlsx', err => {
+      fs.unlink(exportFile, () => {});
+      if (err) next(err);
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Export báo cáo tồn kho ra Excel
+exports.exportInventoryReportToExcel = async (req, res, next) => {
+  try {
+    // Lấy danh sách sản phẩm và thông tin tồn kho
+    const [inventoryData] = await pool.query(
+      `SELECT 
+        p.id, p.name, p.sku, p.category, p.size, p.color,
+        p.quantity, p.cost_price, p.selling_price,
+        (p.quantity * p.cost_price) as inventory_value,
+        s.name as supplier_name
+       FROM products p
+       LEFT JOIN suppliers s ON p.supplier_id = s.id
+       ORDER BY inventory_value DESC`
+    );
+
+    // Chuẩn bị dữ liệu xuất Excel
+    const exportData = inventoryData.map(item => ({
+      'ID': item.id,
+      'Tên sản phẩm': item.name,
+      'SKU': item.sku,
+      'Danh mục': item.category,
+      'Kích cỡ': item.size,
+      'Màu sắc': item.color,
+      'Số lượng': item.quantity,
+      'Giá nhập': item.cost_price,
+      'Giá bán': item.selling_price,
+      'Giá trị tồn': item.inventory_value,
+      'Nhà cung cấp': item.supplier_name
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'InventoryReport');
+
+    const exportDir = path.join(__dirname, '../exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir);
+    }
+    const exportFile = path.join(exportDir, 'inventory_report.xlsx');
+    XLSX.writeFile(workbook, exportFile);
+
+    res.download(exportFile, 'inventory_report.xlsx', err => {
+      fs.unlink(exportFile, () => {});
+      if (err) next(err);
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Export chi tiết giao dịch ra Excel
+exports.exportTransactionHistoryToExcel = async (req, res, next) => {
+  try {
+    // Lấy khoảng thời gian và các bộ lọc từ query params
+    const { startDate, endDate, type, productId } = req.query;
+
+    const filters = {
+      start_date: startDate,
+      end_date: endDate,
+      type,
+      product_id: productId,
+      limit: 10000, // xuất tối đa 10k dòng
+      offset: 0
+    };
+
+    // Lấy danh sách giao dịch
+    const transactions = await Transaction.getAll(filters);
+
+    // Chuẩn bị dữ liệu xuất Excel
+    const exportData = transactions.map(item => ({
+      'ID': item.id,
+      'Ngày giao dịch': item.transaction_date,
+      'Loại': item.type,
+      'Sản phẩm': item.product_name || item.product_id,
+      'SKU': item.sku,
+      'Số lượng': item.quantity,
+      'Đơn giá': item.unit_price,
+      'Tổng tiền': item.total_amount,
+      'Ghi chú': item.note
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'TransactionHistory');
+
+    const exportDir = path.join(__dirname, '../exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir);
+    }
+    const exportFile = path.join(exportDir, 'transaction_history.xlsx');
+    XLSX.writeFile(workbook, exportFile);
+
+    res.download(exportFile, 'transaction_history.xlsx', err => {
+      fs.unlink(exportFile, () => {});
+      if (err) next(err);
     });
   } catch (error) {
     next(error);

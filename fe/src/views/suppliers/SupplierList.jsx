@@ -4,6 +4,7 @@ import Header from '../../components/common/Header';
 import Footer from '../../components/common/Footer';
 import Loading from '../../components/common/Loading';
 import { getSuppliers, searchSuppliers, deleteSupplier } from '../../services/supplierService';
+import axios from 'axios';
 
 const SupplierList = () => {
   const [suppliers, setSuppliers] = useState([]);
@@ -13,6 +14,8 @@ const SupplierList = () => {
   const [status, setStatus] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [supplierToDelete, setSupplierToDelete] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState('');
 
   const fetchSuppliers = async () => {
     try {
@@ -80,6 +83,82 @@ const SupplierList = () => {
     }
   };
 
+  // Hàm lưu file dùng File System Access API nếu có, fallback dùng tạo link download
+  const saveFile = async (blob, filename) => {
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{
+            description: 'Excel file',
+            accept: {'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']}
+          }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } catch (error) {
+        // Người dùng hủy chọn, không làm gì
+      }
+    } else {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/suppliers/export-excel', {
+        responseType: 'blob',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      await saveFile(blob, 'suppliers_export.xlsx');
+      setImportMessage('');
+    } catch (err) {
+      setImportMessage('Không thể xuất file Excel');
+    }
+  };
+
+  const handleImportExcel = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImporting(true);
+    setImportMessage('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await axios.post(
+        'http://localhost:5000/api/suppliers/import-excel',
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      if (response.data.success) {
+        setImportMessage(response.data.message || 'Nhập file thành công');
+        fetchSuppliers();
+      } else {
+        setImportMessage(response.data.message || 'Nhập file thất bại');
+      }
+    } catch (err) {
+      setImportMessage('Không thể nhập file Excel');
+    }
+    setImporting(false);
+    e.target.value = '';
+  };
+
   return (
     <div className="flex flex-col min-h-screen">
       <Header />
@@ -91,7 +170,26 @@ const SupplierList = () => {
             <p className="text-gray-600">Danh sách nhà cung cấp</p>
           </div>
           
-          <div className="mt-4 md:mt-0">
+          <div className="mt-4 md:mt-0 flex gap-2">
+            <button
+              onClick={handleExportExcel}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+            >
+              Xuất Excel
+            </button>
+            <label
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 cursor-pointer"
+              style={{ marginBottom: 0 }}
+            >
+              {importing ? 'Đang nhập...' : 'Nhập Excel'}
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleImportExcel}
+                style={{ display: 'none' }}
+                disabled={importing}
+              />
+            </label>
             <Link
               to="/suppliers/add"
               className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -100,7 +198,13 @@ const SupplierList = () => {
             </Link>
           </div>
         </div>
-        
+
+        {importMessage && (
+          <div className={`mb-4 p-3 rounded ${importMessage.includes('thành công') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+            {importMessage}
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6" role="alert">
             <p>{error}</p>

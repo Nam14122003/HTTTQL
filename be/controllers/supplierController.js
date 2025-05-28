@@ -1,4 +1,7 @@
 const { Supplier } = require('../models/Index');
+const XLSX = require('xlsx');
+const fs = require('fs');
+const path = require('path');
 
 // Lấy danh sách tất cả nhà cung cấp
 exports.getAllSuppliers = async (req, res, next) => {
@@ -158,6 +161,83 @@ exports.searchSuppliers = async (req, res, next) => {
       success: true,
       count: suppliers.length,
       data: suppliers
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Xuất danh sách nhà cung cấp ra file Excel
+exports.exportSuppliersToExcel = async (req, res, next) => {
+  try {
+    const status = req.query.status || null;
+    const suppliers = await Supplier.getAll(status);
+
+    const exportData = suppliers.map((s, idx) => ({
+      'STT': idx + 1,
+      'Tên nhà cung cấp': s.name,
+      'Người liên hệ': s.contact_person || '',
+      'Email': s.email || '',
+      'Số điện thoại': s.phone || '',
+      'Địa chỉ': s.address || '',
+      'Mã số thuế': s.tax_code || '',
+      'Trạng thái': s.status === 'active' ? 'Đang hoạt động' : 'Ngừng hoạt động'
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Suppliers');
+
+    const exportDir = path.join(__dirname, '../exports');
+    if (!fs.existsSync(exportDir)) {
+      fs.mkdirSync(exportDir);
+    }
+    const exportFile = path.join(exportDir, 'suppliers_export.xlsx');
+    XLSX.writeFile(workbook, exportFile);
+
+    res.download(exportFile, 'suppliers_export.xlsx', err => {
+      fs.unlink(exportFile, () => {});
+      if (err) next(err);
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Nhập danh sách nhà cung cấp từ file Excel
+exports.importSuppliersFromExcel = async (req, res, next) => {
+  try {
+    const filePath = req.file.path;
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+
+    let imported = 0;
+    for (const row of rows) {
+      const supplierData = {
+        name: row['Tên nhà cung cấp'] || row['name'],
+        contact_person: row['Người liên hệ'] || row['contact_person'] || '',
+        email: row['Email'] || row['email'] || '',
+        phone: row['Số điện thoại'] || row['phone'],
+        address: row['Địa chỉ'] || row['address'] || '',
+        tax_code: row['Mã số thuế'] || row['tax_code'] || '',
+        status: row['Trạng thái'] === 'Đang hoạt động' ? 'active' : (row['Trạng thái'] === 'Ngừng hoạt động' ? 'inactive' : 'active'),
+        created_by: req.user.id
+      };
+      if (!supplierData.name || !supplierData.phone) continue;
+      try {
+        await Supplier.create(supplierData);
+        imported++;
+      } catch (err) {
+        console.error(`Lỗi khi nhập nhà cung cấp: ${err.message}`);
+      }
+    }
+
+    fs.unlink(filePath, () => {});
+    res.status(200).json({
+      success: true,
+      message: `Đã import ${imported} nhà cung cấp thành công`
     });
   } catch (error) {
     next(error);

@@ -5,6 +5,7 @@ import Footer from '../../components/common/Footer';
 import Loading from '../../components/common/Loading';
 import { getTransactionHistory } from '../../services/transactionService';
 import { getProducts } from '../../services/inventoryService';
+import axios from 'axios';
 
 const TransactionReport = () => {
   const [transactions, setTransactions] = useState([]);
@@ -180,6 +181,39 @@ const TransactionReport = () => {
     }
   };
 
+  // Export chi tiết giao dịch ra Excel
+  const handleExportExcel = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const params = {
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        type: filters.type,
+        productId: filters.productId
+      };
+      const query = Object.entries(params)
+        .filter(([_, v]) => v)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&');
+      const response = await axios.get(
+         `http://localhost:5000/api/reports/transactions/export-excel${query ? '?' + query : ''}`,
+        {
+          responseType: 'blob',
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'transaction_history.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert('Xuất Excel thất bại!');
+    }
+  };
+
   return (
     <div className="flex flex-col min-h-screen">
       <Header />
@@ -192,6 +226,13 @@ const TransactionReport = () => {
           </div>
           
           <div className="mt-4 md:mt-0 flex">
+            {/* Nút export Excel */}
+            <button
+              onClick={handleExportExcel}
+              className="inline-flex items-center px-4 py-2 border border-green-400 rounded-md shadow-sm text-sm font-medium text-green-700 bg-white hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+            >
+              Xuất Excel
+            </button>
             <Link
               to="/reports/revenue"
               className="ml-2 inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
